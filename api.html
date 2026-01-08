@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API — Transcriptify</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <nav>
+        <div class="nav-container">
+            <a href="index.html" class="logo">Transcriptify</a>
+            <div class="nav-links">
+                <a href="index.html">Home</a>
+                <a href="api.html" class="active">API</a>
+            </div>
+        </div>
+    </nav>
+
+    <main class="api-page">
+        <section class="api-hero">
+            <h1>JavaScript API</h1>
+            <p>Integrate Transcriptify's transcription capabilities into your own applications.</p>
+        </section>
+
+        <section class="api-content">
+            <div class="api-sidebar">
+                <h4>Contents</h4>
+                <ul>
+                    <li><a href="#overview">Overview</a></li>
+                    <li><a href="#installation">Installation</a></li>
+                    <li><a href="#quick-start">Quick Start</a></li>
+                    <li><a href="#api-reference">API Reference</a></li>
+                    <li><a href="#events">Events</a></li>
+                    <li><a href="#examples">Examples</a></li>
+                    <li><a href="#browser-support">Browser Support</a></li>
+                </ul>
+            </div>
+
+            <div class="api-main">
+                <article id="overview">
+                    <h2>Overview</h2>
+                    <p>Transcriptify provides a client-side JavaScript API for transcribing audio and video files using the Web Speech API. All processing happens in the browser — no server required, no API keys needed.</p>
+                    
+                    <div class="callout">
+                        <strong>Note:</strong> This API uses the browser's built-in Web Speech API. Results may vary between browsers. Chrome and Edge provide the best accuracy.
+                    </div>
+                </article>
+
+                <article id="installation">
+                    <h2>Installation</h2>
+                    <p>Include the script in your HTML:</p>
+                    <pre><code>&lt;script src="transcribe.js"&gt;&lt;/script&gt;</code></pre>
+                    
+                    <p>Or use as an ES module:</p>
+                    <pre><code>import { Transcriber } from './transcribe.js';</code></pre>
+                </article>
+
+                <article id="quick-start">
+                    <h2>Quick Start</h2>
+                    <pre><code>// Create a new transcriber instance
+const transcriber = new Transcriber();
+
+// Transcribe a video file
+const fileInput = document.querySelector('input[type="file"]');
+fileInput.addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    
+    const result = await transcriber.transcribe(file, {
+        language: 'en-US',
+        onProgress: (progress) => {
+            console.log(`${progress}% complete`);
+        },
+        onPartialResult: (text) => {
+            console.log('Partial:', text);
+        }
+    });
+    
+    console.log('Final transcript:', result.text);
+});</code></pre>
+                </article>
+
+                <article id="api-reference">
+                    <h2>API Reference</h2>
+
+                    <div class="api-method">
+                        <h3><code>new Transcriber(options?)</code></h3>
+                        <p>Creates a new Transcriber instance.</p>
+                        
+                        <h4>Options</h4>
+                        <table class="api-table">
+                            <thead>
+                                <tr>
+                                    <th>Property</th>
+                                    <th>Type</th>
+                                    <th>Default</th>
+                                    <th>Description</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td><code>language</code></td>
+                                    <td>string</td>
+                                    <td>'en-US'</td>
+                                    <td>BCP 47 language code</td>
+                                </tr>
+                                <tr>
+                                    <td><code>continuous</code></td>
+                                    <td>boolean</td>
+                                    <td>true</td>
+                                    <td>Keep recognizing until stopped</td>
+                                </tr>
+                                <tr>
+                                    <td><code>interimResults</code></td>
+                                    <td>boolean</td>
+                                    <td>true</td>
+                                    <td>Return interim results</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div class="api-method">
+                        <h3><code>transcriber.transcribe(file, options?)</code></h3>
+                        <p>Transcribes an audio or video file. Returns a Promise.</p>
+                        
+                        <h4>Parameters</h4>
+                        <table class="api-table">
+                            <thead>
+                                <tr>
+                                    <th>Parameter</th>
+                                    <th>Type</th>
+                                    <th>Description</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td><code>file</code></td>
+                                    <td>File | Blob</td>
+                                    <td>The media file to transcribe</td>
+                                </tr>
+                                <tr>
+                                    <td><code>options.language</code></td>
+                                    <td>string</td>
+                                    <td>Override language for this transcription</td>
+                                </tr>
+                                <tr>
+                                    <td><code>options.onProgress</code></td>
+                                    <td>function</td>
+                                    <td>Callback for progress updates (0-100)</td>
+                                </tr>
+                                <tr>
+                                    <td><code>options.onPartialResult</code></td>
+                                    <td>function</td>
+                                    <td>Callback for interim transcription results</td>
+                                </tr>
+                            </tbody>
+                        </table>
+
+                        <h4>Returns</h4>
+                        <pre><code>{
+    text: string,           // Full transcript text
+    segments: [{
+        text: string,       // Segment text
+        startTime: number,  // Start time in seconds
+        endTime: number,    // End time in seconds
+        confidence: number  // Confidence score (0-1)
+    }],
+    duration: number,       // Total duration in seconds
+    language: string        // Language used
+}</code></pre>
+                    </div>
+
+                    <div class="api-method">
+                        <h3><code>transcriber.cancel()</code></h3>
+                        <p>Cancels the current transcription.</p>
+                    </div>
+
+                    <div class="api-method">
+                        <h3><code>transcriber.isSupported()</code></h3>
+                        <p>Returns <code>true</code> if the browser supports the Web Speech API.</p>
+                    </div>
+
+                    <div class="api-method">
+                        <h3><code>Transcriber.toSRT(segments)</code></h3>
+                        <p>Converts transcript segments to SRT subtitle format.</p>
+                        <pre><code>const srt = Transcriber.toSRT(result.segments);
+// Returns formatted SRT string</code></pre>
+                    </div>
+
+                    <div class="api-method">
+                        <h3><code>Transcriber.toVTT(segments)</code></h3>
+                        <p>Converts transcript segments to WebVTT subtitle format.</p>
+                        <pre><code>const vtt = Transcriber.toVTT(result.segments);
+// Returns formatted VTT string</code></pre>
+                    </div>
+                </article>
+
+                <article id="events">
+                    <h2>Events</h2>
+                    <p>The Transcriber instance emits events you can listen to:</p>
+
+                    <table class="api-table">
+                        <thead>
+                            <tr>
+                                <th>Event</th>
+                                <th>Data</th>
+                                <th>Description</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><code>start</code></td>
+                                <td>—</td>
+                                <td>Transcription started</td>
+                            </tr>
+                            <tr>
+                                <td><code>progress</code></td>
+                                <td><code>{ progress: number }</code></td>
+                                <td>Progress update</td>
+                            </tr>
+                            <tr>
+                                <td><code>result</code></td>
+                                <td><code>{ text: string, isFinal: boolean }</code></td>
+                                <td>Transcription result</td>
+                            </tr>
+                            <tr>
+                                <td><code>end</code></td>
+                                <td><code>{ text: string, segments: array }</code></td>
+                                <td>Transcription complete</td>
+                            </tr>
+                            <tr>
+                                <td><code>error</code></td>
+                                <td><code>{ error: Error }</code></td>
+                                <td>An error occurred</td>
+                            </tr>
+                        </tbody>
+                    </table>
+
+                    <pre><code>transcriber.on('progress', (data) => {
+    console.log(`Progress: ${data.progress}%`);
+});
+
+transcriber.on('result', (data) => {
+    if (data.isFinal) {
+        console.log('Final:', data.text);
+    }
+});</code></pre>
+                </article>
+
+                <article id="examples">
+                    <h2>Examples</h2>
+
+                    <h3>Basic Transcription</h3>
+                    <pre><code>const transcriber = new Transcriber();
+
+async function transcribeVideo(file) {
+    try {
+        const result = await transcriber.transcribe(file);
+        console.log(result.text);
+    } catch (error) {
+        console.error('Transcription failed:', error);
+    }
+}</code></pre>
+
+                    <h3>With Progress Updates</h3>
+                    <pre><code>const result = await transcriber.transcribe(file, {
+    onProgress: (progress) => {
+        progressBar.style.width = `${progress}%`;
+    },
+    onPartialResult: (text) => {
+        transcriptDiv.textContent = text;
+    }
+});</code></pre>
+
+                    <h3>Generate Subtitles</h3>
+                    <pre><code>const result = await transcriber.transcribe(file);
+
+// Create SRT file
+const srt = Transcriber.toSRT(result.segments);
+const blob = new Blob([srt], { type: 'text/plain' });
+const url = URL.createObjectURL(blob);
+
+// Download
+const a = document.createElement('a');
+a.href = url;
+a.download = 'subtitles.srt';
+a.click();</code></pre>
+
+                    <h3>Multiple Languages</h3>
+                    <pre><code>// Spanish
+const resultES = await transcriber.transcribe(file, {
+    language: 'es-ES'
+});
+
+// French
+const resultFR = await transcriber.transcribe(file, {
+    language: 'fr-FR'
+});
+
+// Japanese
+const resultJA = await transcriber.transcribe(file, {
+    language: 'ja-JP'
+});</code></pre>
+                </article>
+
+                <article id="browser-support">
+                    <h2>Browser Support</h2>
+                    <p>The Web Speech API is supported in:</p>
+                    
+                    <table class="api-table">
+                        <thead>
+                            <tr>
+                                <th>Browser</th>
+                                <th>Support</th>
+                                <th>Notes</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>Chrome</td>
+                                <td>✅ Full</td>
+                                <td>Best accuracy, requires internet</td>
+                            </tr>
+                            <tr>
+                                <td>Edge</td>
+                                <td>✅ Full</td>
+                                <td>Same as Chrome</td>
+                            </tr>
+                            <tr>
+                                <td>Safari</td>
+                                <td>⚠️ Partial</td>
+                                <td>macOS 14.1+, limited languages</td>
+                            </tr>
+                            <tr>
+                                <td>Firefox</td>
+                                <td>❌ None</td>
+                                <td>Not supported</td>
+                            </tr>
+                        </tbody>
+                    </table>
+
+                    <div class="callout">
+                        <strong>Privacy Note:</strong> While the video file stays on your device, Chrome and Edge send audio to Google/Microsoft servers for speech recognition. For fully offline transcription, consider using a WebAssembly-based solution like Whisper.cpp.
+                    </div>
+                </article>
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <p>Transcriptify — Client-side video transcription</p>
+    </footer>
+</body>
+</html>
