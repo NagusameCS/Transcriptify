@@ -77,13 +77,10 @@ class Transcriber {
     }
 
     /**
-     * Extract audio from video/audio file
+     * Extract audio from video/audio file and resample to 16kHz
      */
     async extractAudio(file, onProgress) {
         return new Promise((resolve, reject) => {
-            const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-            const audioContext = new AudioContextClass({ sampleRate: 16000 });
-
             const reader = new FileReader();
 
             reader.onprogress = (e) => {
@@ -98,16 +95,33 @@ class Transcriber {
                     if (onProgress) onProgress({ status: 'decoding', message: 'Decoding audio...', percent: 0 });
 
                     const arrayBuffer = e.target.result;
-                    const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+                    
+                    // Use standard sample rate for decoding, then resample
+                    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+                    const audioContext = new AudioContextClass();
+                    
+                    let audioBuffer;
+                    try {
+                        audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+                    } catch (decodeError) {
+                        audioContext.close();
+                        reject(new Error('Failed to decode audio. The file may not contain valid audio or the format is not supported.'));
+                        return;
+                    }
 
-                    // Convert to mono Float32Array at 16kHz (required by Whisper)
-                    const audioData = this.convertToMono(audioBuffer);
+                    if (onProgress) onProgress({ status: 'processing', message: 'Processing audio...', percent: 50 });
+
+                    // Resample to 16kHz mono (required by Whisper)
+                    const targetSampleRate = 16000;
+                    const audioData = this.resampleAudio(audioBuffer, targetSampleRate);
 
                     audioContext.close();
+                    
+                    console.log('Audio extracted:', audioData.length, 'samples at 16kHz');
                     resolve(audioData);
                 } catch (error) {
-                    audioContext.close();
-                    reject(new Error('Failed to decode audio. Make sure the file contains valid audio.'));
+                    console.error('Audio extraction error:', error);
+                    reject(new Error('Failed to process audio: ' + error.message));
                 }
             };
 
@@ -117,25 +131,36 @@ class Transcriber {
     }
 
     /**
-     * Convert AudioBuffer to mono Float32Array
+     * Resample audio to target sample rate and convert to mono
      */
-    convertToMono(audioBuffer) {
+    resampleAudio(audioBuffer, targetSampleRate) {
         const numChannels = audioBuffer.numberOfChannels;
-        const length = audioBuffer.length;
-        const result = new Float32Array(length);
-
-        if (numChannels === 1) {
-            return audioBuffer.getChannelData(0);
-        }
-
-        // Mix all channels to mono
+        const sourceSampleRate = audioBuffer.sampleRate;
+        const sourceLength = audioBuffer.length;
+        
+        // Calculate target length
+        const targetLength = Math.round(sourceLength * targetSampleRate / sourceSampleRate);
+        const result = new Float32Array(targetLength);
+        
+        // First, mix to mono
+        const mono = new Float32Array(sourceLength);
         for (let channel = 0; channel < numChannels; channel++) {
             const channelData = audioBuffer.getChannelData(channel);
-            for (let i = 0; i < length; i++) {
-                result[i] += channelData[i] / numChannels;
+            for (let i = 0; i < sourceLength; i++) {
+                mono[i] += channelData[i] / numChannels;
             }
         }
-
+        
+        // Then resample using linear interpolation
+        const ratio = sourceSampleRate / targetSampleRate;
+        for (let i = 0; i < targetLength; i++) {
+            const srcIndex = i * ratio;
+            const srcIndexFloor = Math.floor(srcIndex);
+            const srcIndexCeil = Math.min(srcIndexFloor + 1, sourceLength - 1);
+            const t = srcIndex - srcIndexFloor;
+            result[i] = mono[srcIndexFloor] * (1 - t) + mono[srcIndexCeil] * t;
+        }
+        
         return result;
     }
 
@@ -172,15 +197,24 @@ class Transcriber {
             if (this.isCancelled) throw new Error('Cancelled');
 
             // Step 3: Transcribe with Whisper
-            onProgress({ status: 'transcribing', message: 'Transcribing audio...', percent: 0 });
+            onProgress({ status: 'transcribing', message: 'Transcribing audio (this may take a while)...', percent: 0 });
             onPartialResult('Processing audio with Whisper AI...');
 
-            const result = await this.pipeline(audioData, {
-                chunk_length_s: 30,
-                stride_length_s: 5,
-                return_timestamps: true,
-                language: this.options.language === 'en' ? null : this.options.language,
-            });
+            console.log('Starting Whisper transcription, audio length:', audioData.length / 16000, 'seconds');
+            
+            let result;
+            try {
+                result = await this.pipeline(audioData, {
+                    chunk_length_s: 30,
+                    stride_length_s: 5,
+                    return_timestamps: true,
+                });
+            } catch (pipelineError) {
+                console.error('Pipeline error:', pipelineError);
+                throw new Error('Transcription failed: ' + pipelineError.message);
+            }
+            
+            console.log('Whisper result:', result);
 
             if (this.isCancelled) throw new Error('Cancelled');
 
@@ -299,9 +333,16 @@ class Transcriber {
 // ===== UI Code (only runs on main page) =====
 
 document.addEventListener('DOMContentLoaded', () => {
+    console.log('Transcriptify: DOM loaded, initializing...');
+
     // Check if we're on the main page
     const dropzone = document.getElementById('dropzone');
-    if (!dropzone) return;
+    if (!dropzone) {
+        console.log('Transcriptify: Not on main page (no dropzone found)');
+        return;
+    }
+
+    console.log('Transcriptify: Found dropzone, setting up event handlers');
 
     const fileInput = document.getElementById('fileInput');
     const processingSection = document.getElementById('processing-section');
@@ -337,22 +378,34 @@ document.addEventListener('DOMContentLoaded', () => {
         dropzone.classList.remove('dragover');
 
         const files = e.dataTransfer.files;
-        if (files.length > 0 && (files[0].type.startsWith('video/') || files[0].type.startsWith('audio/'))) {
-            handleFile(files[0]);
+        if (files.length > 0) {
+            const file = files[0];
+            // Check MIME type or file extension
+            const isVideo = file.type.startsWith('video/') ||
+                file.type.startsWith('audio/') ||
+                /\.(mp4|webm|mov|avi|mkv|mp3|wav|m4a|ogg)$/i.test(file.name);
+            if (isVideo) {
+                handleFile(file);
+            } else {
+                console.log('Rejected file:', file.name, file.type);
+            }
         }
     });
 
-    dropzone.addEventListener('click', () => {
+    dropzone.addEventListener('click', (e) => {
+        e.stopPropagation();
         fileInput.click();
     });
 
     fileInput.addEventListener('change', (e) => {
+        console.log('File input change:', e.target.files);
         if (e.target.files.length > 0) {
             handleFile(e.target.files[0]);
         }
     });
 
     function handleFile(file) {
+        console.log('handleFile called with:', file.name, file.type, file.size);
         currentFile = file;
 
         // Show video preview
