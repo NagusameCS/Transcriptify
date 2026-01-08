@@ -10,7 +10,7 @@ class Transcriber {
             continuous: options.continuous !== false,
             interimResults: options.interimResults !== false
         };
-        
+
         this.recognition = null;
         this.isTranscribing = false;
         this.segments = [];
@@ -66,8 +66,8 @@ class Transcriber {
         }
 
         const language = options.language || this.options.language;
-        const onProgress = options.onProgress || (() => {});
-        const onPartialResult = options.onPartialResult || (() => {});
+        const onProgress = options.onProgress || (() => { });
+        const onPartialResult = options.onPartialResult || (() => { });
 
         return new Promise((resolve, reject) => {
             // Reset state
@@ -108,10 +108,10 @@ class Transcriber {
                     for (let i = event.resultIndex; i < event.results.length; i++) {
                         const result = event.results[i];
                         const transcript = result[0].transcript;
-                        
+
                         if (result.isFinal) {
                             finalTranscript += transcript + ' ';
-                            
+
                             // Create segment
                             const segment = {
                                 text: transcript.trim(),
@@ -119,10 +119,10 @@ class Transcriber {
                                 endTime: this.mediaElement.currentTime,
                                 confidence: result[0].confidence || 0.9
                             };
-                            
+
                             this.segments.push(segment);
                             segmentStartTime = this.mediaElement.currentTime;
-                            
+
                             this.emit('result', { text: transcript, isFinal: true });
                         } else {
                             interimTranscript += transcript;
@@ -139,7 +139,7 @@ class Transcriber {
                     if (event.error === 'no-speech' || event.error === 'aborted') {
                         return;
                     }
-                    
+
                     console.error('Speech recognition error:', event.error);
                     this.emit('error', { error: event.error });
                 };
@@ -165,7 +165,7 @@ class Transcriber {
                 // When video ends
                 this.mediaElement.onended = () => {
                     this.isTranscribing = false;
-                    
+
                     if (this.recognition) {
                         this.recognition.stop();
                     }
@@ -228,12 +228,12 @@ class Transcriber {
      */
     cancel() {
         this.isTranscribing = false;
-        
+
         if (this.recognition) {
             this.recognition.stop();
             this.recognition = null;
         }
-        
+
         if (this.mediaElement) {
             this.mediaElement.pause();
             this.mediaElement.src = '';
@@ -347,7 +347,7 @@ document.addEventListener('DOMContentLoaded', () => {
     dropzone.addEventListener('drop', (e) => {
         e.preventDefault();
         dropzone.classList.remove('dragover');
-        
+
         const files = e.dataTransfer.files;
         if (files.length > 0 && files[0].type.startsWith('video/')) {
             handleFile(files[0]);
@@ -366,25 +366,25 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function handleFile(file) {
         currentFile = file;
-        
+
         // Show video preview
         const videoUrl = URL.createObjectURL(file);
         videoPlayer.src = videoUrl;
-        
+
         // Show processing section
         processingSection.classList.remove('hidden');
         resultSection.classList.add('hidden');
-        
+
         // Reset state
         statusEl.textContent = `Loaded: ${file.name}`;
         progressContainer.classList.add('hidden');
         progressEl.style.width = '0%';
         progressText.textContent = '0%';
         transcriptEl.textContent = '';
-        
+
         transcribeBtn.disabled = false;
         cancelBtn.classList.add('hidden');
-        
+
         // Scroll to processing section
         processingSection.scrollIntoView({ behavior: 'smooth' });
     }
@@ -396,7 +396,7 @@ document.addEventListener('DOMContentLoaded', () => {
         cancelBtn.classList.remove('hidden');
         progressContainer.classList.remove('hidden');
         resultSection.classList.remove('hidden');
-        
+
         statusEl.textContent = 'Starting transcription... (microphone access required)';
         transcriptEl.innerHTML = '<span style="color: var(--text-muted);">Listening for speech...</span>';
 
@@ -415,7 +415,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             statusEl.textContent = 'Transcription complete!';
             cancelBtn.classList.add('hidden');
-            
+
             // Display final result with timestamps
             displayTranscript(transcriptionResult);
 
@@ -467,7 +467,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     downloadBtn.addEventListener('click', () => {
         if (!transcriptionResult) return;
-        
+
         const blob = new Blob([transcriptionResult.text], { type: 'text/plain' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -479,7 +479,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     downloadSrtBtn.addEventListener('click', () => {
         if (!transcriptionResult || !transcriptionResult.segments.length) return;
-        
+
         const srt = Transcriber.toSRT(transcriptionResult.segments);
         const blob = new Blob([srt], { type: 'text/plain' });
         const url = URL.createObjectURL(blob);
