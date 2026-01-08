@@ -43,12 +43,13 @@
                 <article id="overview">
                     <h2>Overview</h2>
                     <p>Transcriptify provides a client-side JavaScript API for transcribing audio and video files using
-                        the Web Speech API. All processing happens in the browser — no server required, no API keys
-                        needed.</p>
+                        OpenAI's Whisper model via Transformers.js. All processing happens in the browser — no server
+                        required, no API keys
+                        needed, no microphone access required.</p>
 
                     <div class="callout">
-                        <strong>Note:</strong> This API uses the browser's built-in Web Speech API. Results may vary
-                        between browsers. Chrome and Edge provide the best accuracy.
+                        <strong>Note:</strong> This API runs Whisper AI entirely in your browser using WebAssembly. The
+                        model is downloaded once and cached. No audio data is ever sent to external servers.
                     </div>
                 </article>
 
@@ -72,16 +73,16 @@ fileInput.addEventListener('change', async (e) => {
     const file = e.target.files[0];
     
     const result = await transcriber.transcribe(file, {
-        language: 'en-US',
         onProgress: (progress) => {
-            console.log(`${progress}% complete`);
-        },
-        onPartialResult: (text) => {
-            console.log('Partial:', text);
+            // progress.status: 'loading' | 'extracting' | 'transcribing' | 'complete'
+            // progress.message: Human-readable status
+            // progress.percent: 0-100
+            console.log(progress.message);
         }
     });
     
     console.log('Final transcript:', result.text);
+    console.log('Segments with timestamps:', result.segments);
 });</code></pre>
                 </article>
 
@@ -104,22 +105,16 @@ fileInput.addEventListener('change', async (e) => {
                             </thead>
                             <tbody>
                                 <tr>
+                                    <td><code>model</code></td>
+                                    <td>string</td>
+                                    <td>'Xenova/whisper-tiny.en'</td>
+                                    <td>Whisper model to use (see models below)</td>
+                                </tr>
+                                <tr>
                                     <td><code>language</code></td>
                                     <td>string</td>
-                                    <td>'en-US'</td>
-                                    <td>BCP 47 language code</td>
-                                </tr>
-                                <tr>
-                                    <td><code>continuous</code></td>
-                                    <td>boolean</td>
-                                    <td>true</td>
-                                    <td>Keep recognizing until stopped</td>
-                                </tr>
-                                <tr>
-                                    <td><code>interimResults</code></td>
-                                    <td>boolean</td>
-                                    <td>true</td>
-                                    <td>Return interim results</td>
+                                    <td>'en'</td>
+                                    <td>Language code (e.g., 'en', 'es', 'fr', 'de', 'ja')</td>
                                 </tr>
                             </tbody>
                         </table>
@@ -183,7 +178,8 @@ fileInput.addEventListener('change', async (e) => {
 
                     <div class="api-method">
                         <h3><code>transcriber.isSupported()</code></h3>
-                        <p>Returns <code>true</code> if the browser supports the Web Speech API.</p>
+                        <p>Returns <code>true</code> if the browser supports AudioContext (required for audio
+                            processing).</p>
                     </div>
 
                     <div class="api-method">
@@ -311,7 +307,7 @@ const resultJA = await transcriber.transcribe(file, {
 
                 <article id="browser-support">
                     <h2>Browser Support</h2>
-                    <p>The Web Speech API is supported in:</p>
+                    <p>Whisper via Transformers.js is supported in modern browsers:</p>
 
                     <table class="api-table">
                         <thead>
@@ -325,7 +321,7 @@ const resultJA = await transcriber.transcribe(file, {
                             <tr>
                                 <td>Chrome</td>
                                 <td>✅ Full</td>
-                                <td>Best accuracy, requires internet</td>
+                                <td>Best performance with WebGPU</td>
                             </tr>
                             <tr>
                                 <td>Edge</td>
@@ -333,22 +329,59 @@ const resultJA = await transcriber.transcribe(file, {
                                 <td>Same as Chrome</td>
                             </tr>
                             <tr>
-                                <td>Safari</td>
-                                <td>⚠️ Partial</td>
-                                <td>macOS 14.1+, limited languages</td>
+                                <td>Firefox</td>
+                                <td>✅ Full</td>
+                                <td>WebAssembly support</td>
                             </tr>
                             <tr>
-                                <td>Firefox</td>
-                                <td>❌ None</td>
-                                <td>Not supported</td>
+                                <td>Safari</td>
+                                <td>✅ Full</td>
+                                <td>macOS/iOS 15+</td>
+                            </tr>
+                        </tbody>
+                    </table>
+
+                    <h3>Available Models</h3>
+                    <table class="api-table">
+                        <thead>
+                            <tr>
+                                <th>Model</th>
+                                <th>Size</th>
+                                <th>Speed</th>
+                                <th>Accuracy</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><code>Xenova/whisper-tiny.en</code></td>
+                                <td>~40MB</td>
+                                <td>Fastest</td>
+                                <td>Good (English only)</td>
+                            </tr>
+                            <tr>
+                                <td><code>Xenova/whisper-tiny</code></td>
+                                <td>~40MB</td>
+                                <td>Fastest</td>
+                                <td>Good (Multilingual)</td>
+                            </tr>
+                            <tr>
+                                <td><code>Xenova/whisper-base</code></td>
+                                <td>~75MB</td>
+                                <td>Fast</td>
+                                <td>Better</td>
+                            </tr>
+                            <tr>
+                                <td><code>Xenova/whisper-small</code></td>
+                                <td>~250MB</td>
+                                <td>Moderate</td>
+                                <td>Best</td>
                             </tr>
                         </tbody>
                     </table>
 
                     <div class="callout">
-                        <strong>Privacy Note:</strong> While the video file stays on your device, Chrome and Edge send
-                        audio to Google/Microsoft servers for speech recognition. For fully offline transcription,
-                        consider using a WebAssembly-based solution like Whisper.cpp.
+                        <strong>Privacy Note:</strong> All transcription happens locally in your browser. Your video and
+                        audio data never leaves your device. The AI model is downloaded once and cached in your browser.
                     </div>
                 </article>
             </div>

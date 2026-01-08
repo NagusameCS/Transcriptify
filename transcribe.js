@@ -1,30 +1,28 @@
 /**
- * Transcriptify - Client-side video transcription using Web Speech API
- * All processing happens in the browser - no server required
+ * Transcriptify - Client-side video transcription using Whisper AI
+ * Uses Transformers.js to run Whisper directly in the browser
+ * No server, no API keys, no microphone needed
  */
 
 class Transcriber {
     constructor(options = {}) {
         this.options = {
-            language: options.language || 'en-US',
-            continuous: options.continuous !== false,
-            interimResults: options.interimResults !== false
+            model: options.model || 'Xenova/whisper-tiny.en',
+            language: options.language || 'en',
         };
 
-        this.recognition = null;
+        this.pipeline = null;
         this.isTranscribing = false;
+        this.isCancelled = false;
         this.segments = [];
-        this.currentText = '';
         this.listeners = {};
-        this.audioContext = null;
-        this.mediaElement = null;
     }
 
     /**
-     * Check if Web Speech API is supported
+     * Check if browser supports required features
      */
     isSupported() {
-        return 'webkitSpeechRecognition' in window || 'SpeechRecognition' in window;
+        return typeof AudioContext !== 'undefined' || typeof webkitAudioContext !== 'undefined';
     }
 
     /**
@@ -58,168 +56,172 @@ class Transcriber {
     }
 
     /**
-     * Transcribe a video/audio file
+     * Load the Whisper model
      */
-    async transcribe(file, options = {}) {
-        if (!this.isSupported()) {
-            throw new Error('Web Speech API is not supported in this browser. Please use Chrome or Edge.');
-        }
+    async loadModel(onProgress) {
+        if (this.pipeline) return this.pipeline;
 
-        const language = options.language || this.options.language;
-        const onProgress = options.onProgress || (() => { });
-        const onPartialResult = options.onPartialResult || (() => { });
+        const { pipeline } = await import('https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.1');
 
+        this.pipeline = await pipeline('automatic-speech-recognition', this.options.model, {
+            progress_callback: (progress) => {
+                if (progress.status === 'downloading' || progress.status === 'progress') {
+                    const percent = progress.progress ? Math.round(progress.progress) : 0;
+                    if (onProgress) onProgress({ status: 'loading', message: `Loading AI model... ${percent}%`, percent });
+                    this.emit('loading', { percent, file: progress.file });
+                }
+            }
+        });
+
+        return this.pipeline;
+    }
+
+    /**
+     * Extract audio from video/audio file
+     */
+    async extractAudio(file, onProgress) {
         return new Promise((resolve, reject) => {
-            // Reset state
-            this.segments = [];
-            this.currentText = '';
-            this.isTranscribing = true;
+            const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+            const audioContext = new AudioContextClass({ sampleRate: 16000 });
 
-            // Create media element
-            const mediaUrl = URL.createObjectURL(file);
-            this.mediaElement = document.createElement('video');
-            this.mediaElement.src = mediaUrl;
-            this.mediaElement.muted = true; // Mute to avoid echo
+            const reader = new FileReader();
 
-            // Wait for metadata
-            this.mediaElement.onloadedmetadata = () => {
-                const duration = this.mediaElement.duration;
-                let startTime = 0;
-
-                // Setup speech recognition
-                const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-                this.recognition = new SpeechRecognition();
-                this.recognition.lang = language;
-                this.recognition.continuous = true;
-                this.recognition.interimResults = true;
-                this.recognition.maxAlternatives = 1;
-
-                let finalTranscript = '';
-                let segmentStartTime = 0;
-
-                this.recognition.onstart = () => {
-                    this.emit('start');
-                    segmentStartTime = this.mediaElement.currentTime;
-                };
-
-                this.recognition.onresult = (event) => {
-                    let interimTranscript = '';
-
-                    for (let i = event.resultIndex; i < event.results.length; i++) {
-                        const result = event.results[i];
-                        const transcript = result[0].transcript;
-
-                        if (result.isFinal) {
-                            finalTranscript += transcript + ' ';
-
-                            // Create segment
-                            const segment = {
-                                text: transcript.trim(),
-                                startTime: segmentStartTime,
-                                endTime: this.mediaElement.currentTime,
-                                confidence: result[0].confidence || 0.9
-                            };
-
-                            this.segments.push(segment);
-                            segmentStartTime = this.mediaElement.currentTime;
-
-                            this.emit('result', { text: transcript, isFinal: true });
-                        } else {
-                            interimTranscript += transcript;
-                        }
-                    }
-
-                    this.currentText = finalTranscript + interimTranscript;
-                    onPartialResult(this.currentText);
-                    this.emit('result', { text: this.currentText, isFinal: false });
-                };
-
-                this.recognition.onerror = (event) => {
-                    // Ignore no-speech errors and aborted errors during normal operation
-                    if (event.error === 'no-speech' || event.error === 'aborted') {
-                        return;
-                    }
-
-                    console.error('Speech recognition error:', event.error);
-                    this.emit('error', { error: event.error });
-                };
-
-                this.recognition.onend = () => {
-                    if (this.isTranscribing && this.mediaElement && !this.mediaElement.ended) {
-                        // Restart recognition if still playing
-                        try {
-                            this.recognition.start();
-                        } catch (e) {
-                            // Recognition might already be starting
-                        }
-                    }
-                };
-
-                // Progress tracking
-                this.mediaElement.ontimeupdate = () => {
-                    const progress = Math.round((this.mediaElement.currentTime / duration) * 100);
-                    onProgress(progress);
-                    this.emit('progress', { progress });
-                };
-
-                // When video ends
-                this.mediaElement.onended = () => {
-                    this.isTranscribing = false;
-
-                    if (this.recognition) {
-                        this.recognition.stop();
-                    }
-
-                    // Clean up
-                    URL.revokeObjectURL(mediaUrl);
-
-                    const result = {
-                        text: finalTranscript.trim(),
-                        segments: this.segments,
-                        duration: duration,
-                        language: language
-                    };
-
-                    this.emit('end', result);
-                    resolve(result);
-                };
-
-                // Handle errors
-                this.mediaElement.onerror = (e) => {
-                    this.isTranscribing = false;
-                    URL.revokeObjectURL(mediaUrl);
-                    reject(new Error('Failed to load media file'));
-                };
-
-                // Start playback and recognition
-                this.mediaElement.play().then(() => {
-                    // Use audio capture for speech recognition
-                    this.setupAudioCapture(this.mediaElement).then(() => {
-                        try {
-                            this.recognition.start();
-                        } catch (e) {
-                            console.error('Failed to start recognition:', e);
-                        }
-                    });
-                }).catch(reject);
+            reader.onprogress = (e) => {
+                if (e.lengthComputable && onProgress) {
+                    const percent = Math.round((e.loaded / e.total) * 100);
+                    onProgress({ status: 'reading', message: `Reading file... ${percent}%`, percent });
+                }
             };
 
-            this.mediaElement.onerror = () => {
-                reject(new Error('Failed to load media file'));
+            reader.onload = async (e) => {
+                try {
+                    if (onProgress) onProgress({ status: 'decoding', message: 'Decoding audio...', percent: 0 });
+
+                    const arrayBuffer = e.target.result;
+                    const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+
+                    // Convert to mono Float32Array at 16kHz (required by Whisper)
+                    const audioData = this.convertToMono(audioBuffer);
+
+                    audioContext.close();
+                    resolve(audioData);
+                } catch (error) {
+                    audioContext.close();
+                    reject(new Error('Failed to decode audio. Make sure the file contains valid audio.'));
+                }
             };
+
+            reader.onerror = () => reject(new Error('Failed to read file'));
+            reader.readAsArrayBuffer(file);
         });
     }
 
     /**
-     * Setup audio capture from media element
+     * Convert AudioBuffer to mono Float32Array
      */
-    async setupAudioCapture(mediaElement) {
+    convertToMono(audioBuffer) {
+        const numChannels = audioBuffer.numberOfChannels;
+        const length = audioBuffer.length;
+        const result = new Float32Array(length);
+
+        if (numChannels === 1) {
+            return audioBuffer.getChannelData(0);
+        }
+
+        // Mix all channels to mono
+        for (let channel = 0; channel < numChannels; channel++) {
+            const channelData = audioBuffer.getChannelData(channel);
+            for (let i = 0; i < length; i++) {
+                result[i] += channelData[i] / numChannels;
+            }
+        }
+
+        return result;
+    }
+
+    /**
+     * Transcribe a video/audio file
+     */
+    async transcribe(file, options = {}) {
+        if (!this.isSupported()) {
+            throw new Error('AudioContext is not supported in this browser.');
+        }
+
+        const onProgress = options.onProgress || (() => { });
+        const onPartialResult = options.onPartialResult || (() => { });
+
+        this.isTranscribing = true;
+        this.isCancelled = false;
+        this.segments = [];
+
         try {
-            // Request microphone permission - this is needed for speech recognition
-            // The actual audio comes from the video, but we need permission
-            await navigator.mediaDevices.getUserMedia({ audio: true });
-        } catch (e) {
-            console.warn('Microphone access denied. Speech recognition may not work properly.');
+            this.emit('start');
+
+            // Step 1: Load the model
+            onProgress({ status: 'loading', message: 'Loading AI model...', percent: 0 });
+            await this.loadModel((progress) => {
+                onProgress(progress);
+            });
+
+            if (this.isCancelled) throw new Error('Cancelled');
+
+            // Step 2: Extract audio from video
+            onProgress({ status: 'extracting', message: 'Extracting audio from video...', percent: 0 });
+            const audioData = await this.extractAudio(file, onProgress);
+
+            if (this.isCancelled) throw new Error('Cancelled');
+
+            // Step 3: Transcribe with Whisper
+            onProgress({ status: 'transcribing', message: 'Transcribing audio...', percent: 0 });
+            onPartialResult('Processing audio with Whisper AI...');
+
+            const result = await this.pipeline(audioData, {
+                chunk_length_s: 30,
+                stride_length_s: 5,
+                return_timestamps: true,
+                language: this.options.language === 'en' ? null : this.options.language,
+            });
+
+            if (this.isCancelled) throw new Error('Cancelled');
+
+            // Process results
+            let fullText = '';
+            this.segments = [];
+
+            if (result.chunks && result.chunks.length > 0) {
+                this.segments = result.chunks.map(chunk => ({
+                    text: chunk.text.trim(),
+                    startTime: chunk.timestamp[0] || 0,
+                    endTime: chunk.timestamp[1] || 0,
+                    confidence: 0.9
+                }));
+                fullText = this.segments.map(s => s.text).join(' ');
+            } else {
+                fullText = result.text || '';
+            }
+
+            onProgress({ status: 'complete', message: 'Transcription complete!', percent: 100 });
+
+            const finalResult = {
+                text: fullText.trim(),
+                segments: this.segments,
+                duration: this.segments.length > 0 ? this.segments[this.segments.length - 1].endTime : 0,
+                language: this.options.language
+            };
+
+            this.emit('end', finalResult);
+            this.isTranscribing = false;
+
+            return finalResult;
+
+        } catch (error) {
+            this.isTranscribing = false;
+            if (error.message === 'Cancelled') {
+                this.emit('cancel');
+                throw error;
+            }
+            this.emit('error', { error });
+            throw error;
         }
     }
 
@@ -227,19 +229,8 @@ class Transcriber {
      * Cancel ongoing transcription
      */
     cancel() {
+        this.isCancelled = true;
         this.isTranscribing = false;
-
-        if (this.recognition) {
-            this.recognition.stop();
-            this.recognition = null;
-        }
-
-        if (this.mediaElement) {
-            this.mediaElement.pause();
-            this.mediaElement.src = '';
-            this.mediaElement = null;
-        }
-
         this.emit('cancel');
     }
 
@@ -296,6 +287,9 @@ class Transcriber {
      * Format time for display (MM:SS)
      */
     static formatTimeDisplay(seconds) {
+        if (seconds === null || seconds === undefined || isNaN(seconds)) {
+            return '00:00';
+        }
         const m = Math.floor(seconds / 60);
         const s = Math.floor(seconds % 60);
         return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
@@ -328,12 +322,6 @@ document.addEventListener('DOMContentLoaded', () => {
     let currentFile = null;
     let transcriptionResult = null;
 
-    // Check browser support
-    if (!transcriber.isSupported()) {
-        statusEl.textContent = '⚠️ Your browser does not support speech recognition. Please use Chrome or Edge.';
-        statusEl.style.color = '#ff6b6b';
-    }
-
     // Drag and drop handlers
     dropzone.addEventListener('dragover', (e) => {
         e.preventDefault();
@@ -349,7 +337,7 @@ document.addEventListener('DOMContentLoaded', () => {
         dropzone.classList.remove('dragover');
 
         const files = e.dataTransfer.files;
-        if (files.length > 0 && files[0].type.startsWith('video/')) {
+        if (files.length > 0 && (files[0].type.startsWith('video/') || files[0].type.startsWith('audio/'))) {
             handleFile(files[0]);
         }
     });
@@ -377,6 +365,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Reset state
         statusEl.textContent = `Loaded: ${file.name}`;
+        statusEl.style.color = '';
         progressContainer.classList.add('hidden');
         progressEl.style.width = '0%';
         progressText.textContent = '0%';
@@ -397,32 +386,51 @@ document.addEventListener('DOMContentLoaded', () => {
         progressContainer.classList.remove('hidden');
         resultSection.classList.remove('hidden');
 
-        statusEl.textContent = 'Starting transcription... (microphone access required)';
-        transcriptEl.innerHTML = '<span style="color: var(--text-muted);">Listening for speech...</span>';
+        statusEl.textContent = 'Initializing...';
+        statusEl.style.color = '';
+        transcriptEl.innerHTML = '<span style="color: var(--text-muted);">Preparing to transcribe...</span>';
 
         try {
             transcriptionResult = await transcriber.transcribe(currentFile, {
                 onProgress: (progress) => {
-                    progressEl.style.width = `${progress}%`;
-                    progressText.textContent = `${progress}%`;
+                    statusEl.textContent = progress.message || progress.status;
+                    if (progress.percent !== undefined) {
+                        progressEl.style.width = `${progress.percent}%`;
+                        progressText.textContent = `${progress.percent}%`;
+                    }
+
+                    // Update transcript area with status
+                    if (progress.status === 'loading') {
+                        transcriptEl.innerHTML = `<span style="color: var(--text-muted);">Loading Whisper AI model... This may take a moment on first use.</span>`;
+                    } else if (progress.status === 'extracting' || progress.status === 'decoding') {
+                        transcriptEl.innerHTML = `<span style="color: var(--text-muted);">Extracting audio from video...</span>`;
+                    } else if (progress.status === 'transcribing') {
+                        transcriptEl.innerHTML = `<span style="color: var(--text-muted);">Transcribing with Whisper AI... This runs entirely in your browser.</span>`;
+                    }
                 },
                 onPartialResult: (text) => {
                     if (text.trim()) {
-                        transcriptEl.textContent = text;
+                        transcriptEl.innerHTML = `<span style="color: var(--text-muted);">${text}</span>`;
                     }
                 }
             });
 
             statusEl.textContent = 'Transcription complete!';
             cancelBtn.classList.add('hidden');
+            progressEl.style.width = '100%';
+            progressText.textContent = '100%';
 
             // Display final result with timestamps
             displayTranscript(transcriptionResult);
 
         } catch (error) {
             console.error('Transcription error:', error);
-            statusEl.textContent = `Error: ${error.message}`;
-            statusEl.style.color = '#ff6b6b';
+            if (error.message !== 'Cancelled') {
+                statusEl.textContent = `Error: ${error.message}`;
+                statusEl.style.color = '#ff6b6b';
+            } else {
+                statusEl.textContent = 'Transcription cancelled';
+            }
             transcribeBtn.disabled = false;
             cancelBtn.classList.add('hidden');
         }
